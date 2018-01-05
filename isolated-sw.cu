@@ -265,6 +265,7 @@ int main(int argc, char *argv[])
 	int tlen = TLEN;
 	int qlen = QLEN;
 	int num = NUM;
+	int ftime = 0;
 	int i, j, k, l, c;
 	int8_t mat[MATH_SIZE * MATH_SIZE];
 	uint8_t *query, *target;
@@ -401,11 +402,15 @@ int main(int argc, char *argv[])
 				O_DEL, E_DEL, O_INS, E_INS, W, END_BONUS, ZDROP, H0);
 
 		if(cmax == max && cmax_i == max_i && cmax_j == max_j && \
-				cmax_ie == max_ie && gscore == cgscore && max_off == cmax_off)
+				cmax_ie == max_ie && gscore == cgscore && max_off == cmax_off) {
 			printf("\nTEST %d PASSED.\n", l);
-		else printf("\nTEST %d FAILED.\n", l);
+		}
+		else {
+			ftime += 1;
+			printf("\nTEST %d FAILED.\n", l);
+		}
 	}
-
+	fprintf(stderr, "[RESULT]: Failed time = %d.\n", ftime);
 	return 0;
 }
 
