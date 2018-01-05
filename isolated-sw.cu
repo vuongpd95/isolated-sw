@@ -31,7 +31,7 @@
 #define END_BONUS 5
 #define ZDROP 100
 #define H0 200
-#define THREAD_CHECK 4
+#define THREAD_CHECK 0
 
 typedef struct {
 	int32_t h, e;
@@ -69,7 +69,7 @@ __device__ int mLock = 0;
 extern __shared__ int32_t container[];
 
 __global__
-void sw_kernel(int w, int oe_ins, int e_ins, int o_del, int e_del, int oe_del, int m, \
+void sw_kernel(int tcheck, int w, int oe_ins, int e_ins, int o_del, int e_del, int oe_del, int m, \
 		int tlen, int qlen, int passes, int t_lastp, int h0, int zdrop, \
 		int32_t *h, int8_t *qp, const uint8_t *target)
 {
@@ -159,8 +159,8 @@ void sw_kernel(int w, int oe_ins, int e_ins, int o_del, int e_del, int oe_del, i
 			__syncthreads();
 			if(check_active(in_h, in_e)) {
 				int local_h;
-				if(threadIdx.x == THREAD_CHECK)
-					printf("j = %d, M = %d, h1 = %d\n", beg, in_h, h1);
+				if(threadIdx.x == tcheck && DEBUG == 1)
+					printf("i = %d, j = %d, M = %d, h1 = %d\n", row_i, beg, in_h, h1);
 
 				out_h[threadIdx.x] = h1;
 				if(i != passes - 1) sh[beg] = h1;
@@ -176,8 +176,8 @@ void sw_kernel(int w, int oe_ins, int e_ins, int o_del, int e_del, int oe_del, i
 				// local_h = local_h > f? local_h : f;
 				if(local_h < f) local_h = f;
 
-				if(threadIdx.x == THREAD_CHECK)
-					printf("j = %d, h = %d\n", beg, local_h);
+				if(threadIdx.x == tcheck && DEBUG == 1)
+					printf("i = %d, j = %d, h = %d\n", row_i, beg, local_h);
 				h1 = local_h;
 
 				// mj = local_m > local_h? mj : beg;
@@ -200,9 +200,9 @@ void sw_kernel(int w, int oe_ins, int e_ins, int o_del, int e_del, int oe_del, i
 				f -= e_ins;
 				//f = f > t? f : t;
 				if(f < t) f = t;
-				if(threadIdx.x == THREAD_CHECK)
-					printf("j = %d, M = %d, h = %d, h1 = %d, e = %d, f = %d, t = %d\n", \
-							beg, in_h, local_h, h1, in_e, f, t);
+				if(threadIdx.x == tcheck && DEBUG == 1)
+					printf("i = %d, j = %d, M = %d, h = %d, h1 = %d, e = %d, f = %d, t = %d\n", \
+							row_i, beg, in_h, local_h, h1, in_e, f, t);
 				reset(&in_h, &in_e);
 				beg += 1;
 			}
@@ -254,10 +254,10 @@ void sw_kernel(int w, int oe_ins, int e_ins, int o_del, int e_del, int oe_del, i
 		//if (break_cnt > 0) break;
 	}
 	__syncthreads();
-	if(threadIdx.x == THREAD_CHECK) {
-		if(DEBUG) printf("max = %d, max_i = %d, max_j = %d, max_ie = %d, gscore = %d, max_off = %d\n",\
-				max, max_i, max_j, max_ie, gscore, max_off);
-	}
+//	if(threadIdx.x == tcheck && DEBUG == 1) {
+//		printf("max = %d, max_i = %d, max_j = %d, max_ie = %d, gscore = %d, max_off = %d\n",\
+//				max, max_i, max_j, max_ie, gscore, max_off);
+//	}
 }
 
 #define TLEN 50
@@ -275,9 +275,11 @@ int main(void)
 	bwa_fill_scmat(A, B, mat);
 
 
-	int GPU;
-	printf("GPU (1) or CPU (0): ");
+	int GPU, tcheck = THREAD_CHECK;
+//	printf("GPU (1) or CPU (0): ");
 	scanf("%d", &GPU);
+//	printf("tcheck: ");
+	scanf("%d", &tcheck);
 
 	if(GPU) {
 		int h0 = H0;
@@ -350,9 +352,9 @@ int main(void)
 		gpuErrchk(cudaMemcpy(d_target, target, sizeof(uint8_t) * TLEN, cudaMemcpyHostToDevice));
 		// The kernel
 
-		printf("Passes = %d, t_lastp = %d\n", passes, t_lastp);
+//		if(DEBUG) printf("Passes = %d, t_lastp = %d\n", passes, t_lastp);
 		sw_kernel<<<1, WARP, 2 * (QLEN + 1) * sizeof(int32_t) + QLEN * MATH_SIZE * sizeof(int8_t)>>>\
-				(w, oe_ins, E_INS, O_DEL, E_DEL, oe_del, MATH_SIZE, \
+				(tcheck, w, oe_ins, E_INS, O_DEL, E_DEL, oe_del, MATH_SIZE, \
 				TLEN, QLEN, passes, t_lastp, h0, ZDROP, \
 				d_h, d_qp, d_target);
 
@@ -444,12 +446,12 @@ int ksw_extend2(int qlen, const uint8_t *query, int tlen, const uint8_t *target,
 			//   F(i,j+1) = max{H(i,j)-gapo, F(i,j)} - gape
 			eh_t *p = &eh[j];
 			int h, M = p->h, e = p->e; // get H(i-1,j-1) and E(i-1,j)
-			if(DEBUG) printf("j = %d, M = %d, h1 = %d\n", j, M, h1);
+			if(DEBUG) printf("i = %d, j = %d, M = %d, h1 = %d\n", i, j, M, h1);
 			p->h = h1;          // set H(i,j-1) for the next row
 			M = M? M + q[j] : 0;// separating H and M to disallow a cigar like "100M3I3D20M"
 			h = M > e? M : e;   // e and f are guaranteed to be non-negative, so h>=0 even if M<0
 			h = h > f? h : f;
-			if(DEBUG) printf("j = %d, h = %d\n", j, h);
+			if(DEBUG) printf("i = %d, j = %d, h = %d\n", i, j, h);
 			h1 = h;             // save H(i,j) to h1 for the next column
 			mj = m > h? mj : j; // record the position where max score is achieved
 			m = m > h? m : h;   // m is stored at eh[mj+1]
@@ -462,8 +464,8 @@ int ksw_extend2(int qlen, const uint8_t *query, int tlen, const uint8_t *target,
 			t = t > 0? t : 0;
 			f -= e_ins;
 			f = f > t? f : t;   // computed F(i,j+1)
-			if(DEBUG) printf("j = %d, M = %d, h = %d, h1 = %d, e = %d, f = %d, t = %d\n", \
-				j, M, h, h1, e, f, t);
+			if(DEBUG) printf("i = %d, j = %d, M = %d, h = %d, h1 = %d, e = %d, f = %d, t = %d\n", \
+				i, j, M, h, h1, e, f, t);
 		}
 		eh[end].h = h1; eh[end].e = 0;
 		if (j == qlen) {
