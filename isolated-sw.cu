@@ -32,33 +32,10 @@
 #define ZDROP 100
 #define H0 200
 #define THREAD_CHECK 0
-#define QLEN 61
-#define TLEN 66
-#define QSTRING "GGGGGGGGGGGACGTAGGGGGAAAGGGGGGGGGGgTGgggggAAAgggggggTTCCTTTTT"
-#define TSTRING "GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGACGTG"
 
 typedef struct {
 	int32_t h, e;
 } eh_t;
-
-unsigned char nst_nt4_table[256] = {
-	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 5 /*'-'*/, 4, 4,
-	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-	4, 0, 4, 1,  4, 4, 4, 2,  4, 4, 4, 4,  4, 4, 4, 4,
-	4, 4, 4, 4,  3, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-	4, 0, 4, 1,  4, 4, 4, 2,  4, 4, 4, 4,  4, 4, 4, 4,
-	4, 4, 4, 4,  3, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4
-};
 
 void gpuAssert(cudaError_t code, const char *file, int line, bool abort = true)
 {
@@ -283,25 +260,20 @@ void sw_kernel(int w, int oe_ins, int e_ins, int o_del, int e_del, int oe_del, i
 	}
 }
 
+#define TLEN 10
+#define QLEN 10
 int main(void)
 {
-	int i;
 	int8_t mat[MATH_SIZE * MATH_SIZE];
 
-	char c_query[QLEN + 1] = QSTRING;
-	char c_target[TLEN + 1] = TSTRING;
+	uint8_t cquery[10] = {0, 3, 0, 3, 0, 3, 1, 0, 2, 3};
+	uint8_t ctarget[10] = {2, 1, 2, 3, 0, 3, 1, 3, 2, 1};
 
-	uint8_t *query, *target;
+	uint8_t *query = &cquery[0];
+	uint8_t* target = &ctarget[0];
 
 	bwa_fill_scmat(A, B, mat);
 
-	for (i = 0; i < QLEN; ++i) // convert to 2-bit encoding if we have not done so
-		c_query[i] = c_query[i] < 4? c_query[i] : nst_nt4_table[(int)c_query[i]];
-	for (i = 0; i < TLEN; ++i) // convert to 2-bit encoding if we have not done so
-		c_target[i] = c_target[i] < 4? c_target[i] : nst_nt4_table[(int)c_target[i]];
-
-	query = (uint8_t*)&c_query[0];
-	target = (uint8_t*)&c_target[0];
 
 	int GPU;
 	printf("GPU (1) or CPU (0): ");
