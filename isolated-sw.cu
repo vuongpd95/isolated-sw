@@ -14,12 +14,13 @@
 #include <stdio.h>
 #include <inttypes.h>
 #include <assert.h>
+#include <getopt.h>
+#include <time.h>
 
 #define WARP 1024
 #define LIKELY(x) __builtin_expect((x),1)
 #define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 
-#define DEBUG 1
 #define A 1
 #define B 4
 #define MATH_SIZE 5
@@ -31,34 +32,14 @@
 #define END_BONUS 5
 #define ZDROP 100
 #define H0 200
-#define THREAD_CHECK 0
-#define QLEN 61
-#define TLEN 66
-#define QSTRING "GGGGGGGGGGGACGTAGGGGGAAAGGGGGGGGGGgTGgggggAAAgggggggTTCCTTTTT"
-#define TSTRING "GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGACGTG"
+#define TLEN 10
+#define QLEN 10
+#define NUM 100
+#define RANGE 4
 
 typedef struct {
 	int32_t h, e;
 } eh_t;
-
-unsigned char nst_nt4_table[256] = {
-	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 5 /*'-'*/, 4, 4,
-	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-	4, 0, 4, 1,  4, 4, 4, 2,  4, 4, 4, 4,  4, 4, 4, 4,
-	4, 4, 4, 4,  3, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-	4, 0, 4, 1,  4, 4, 4, 2,  4, 4, 4, 4,  4, 4, 4, 4,
-	4, 4, 4, 4,  3, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4
-};
 
 void gpuAssert(cudaError_t code, const char *file, int line, bool abort = true)
 {
@@ -72,7 +53,8 @@ void gpuAssert(cudaError_t code, const char *file, int line, bool abort = true)
 }
 
 void bwa_fill_scmat(int a, int b, int8_t mat[25]);
-int ksw_extend2(int qlen, const uint8_t *query, int tlen, const uint8_t *target, int m, const int8_t *mat, \
+int ksw_extend2(int *cmax_i, int *cmax_j, int *cmax_ie, int *cgscore, int *cmax_off, \
+		int qlen, const uint8_t *query, int tlen, const uint8_t *target, int m, const int8_t *mat, \
 		int o_del, int e_del, int o_ins, int e_ins, int w, int end_bonus, int zdrop, int h0);
 
 __device__
@@ -92,7 +74,8 @@ __device__ int mLock = 0;
 extern __shared__ int32_t container[];
 
 __global__
-void sw_kernel(int w, int oe_ins, int e_ins, int o_del, int e_del, int oe_del, int m, \
+void sw_kernel(int *d_max, int *d_max_j, int *d_max_i, int *d_max_ie, int *d_gscore, int *d_max_off, \
+		int w, int oe_ins, int e_ins, int o_del, int e_del, int oe_del, int m, \
 		int tlen, int qlen, int passes, int t_lastp, int h0, int zdrop, \
 		int32_t *h, int8_t *qp, const uint8_t *target)
 {
@@ -164,11 +147,6 @@ void sw_kernel(int w, int oe_ins, int e_ins, int o_del, int e_del, int oe_del, i
 			if (h1 < 0) h1 = 0;
 		} else h1 = 0;
 
-		if(threadIdx.x == THREAD_CHECK) {
-			for(int k = 0; k <= qlen; k++) {
-				printf("h[%d] = %d, e[%d] = %d\n", k, sh[k], k, se[k]);
-			}
-		}
 		__syncthreads();
 
 		 while(beg < end) {
@@ -182,8 +160,6 @@ void sw_kernel(int w, int oe_ins, int e_ins, int o_del, int e_del, int oe_del, i
 			__syncthreads();
 			if(check_active(in_h, in_e)) {
 				int local_h;
-				if(threadIdx.x == THREAD_CHECK)
-					printf("j = %d, M = %d, h1 = %d\n", beg, in_h, h1);
 
 				out_h[threadIdx.x] = h1;
 				if(i != passes - 1) sh[beg] = h1;
@@ -199,8 +175,6 @@ void sw_kernel(int w, int oe_ins, int e_ins, int o_del, int e_del, int oe_del, i
 				// local_h = local_h > f? local_h : f;
 				if(local_h < f) local_h = f;
 
-				if(threadIdx.x == THREAD_CHECK)
-					printf("j = %d, h = %d\n", beg, local_h);
 				h1 = local_h;
 
 				// mj = local_m > local_h? mj : beg;
@@ -223,9 +197,7 @@ void sw_kernel(int w, int oe_ins, int e_ins, int o_del, int e_del, int oe_del, i
 				f -= e_ins;
 				//f = f > t? f : t;
 				if(f < t) f = t;
-				if(threadIdx.x == THREAD_CHECK)
-					printf("j = %d, M = %d, h = %d, h1 = %d, e = %d, f = %d, t = %d\n", \
-							beg, in_h, local_h, h1, in_e, f, t);
+
 				reset(&in_h, &in_e);
 				beg += 1;
 			}
@@ -240,8 +212,6 @@ void sw_kernel(int w, int oe_ins, int e_ins, int o_del, int e_del, int oe_del, i
 			}
 		}
 
-		__syncthreads();
-
 		blocked = true;
 		while(blocked) {
 			if(0 == atomicCAS(&mLock, 0, 1)) {
@@ -254,7 +224,10 @@ void sw_kernel(int w, int oe_ins, int e_ins, int o_del, int e_del, int oe_del, i
 				blocked = false;
 			}
 		}
+
+		if (m == 0) atomicAdd(&break_cnt, 1);
 		__syncthreads();
+		if (break_cnt > 0) break;
 
 		blocked = true;
 		while(blocked) {
@@ -274,77 +247,91 @@ void sw_kernel(int w, int oe_ins, int e_ins, int o_del, int e_del, int oe_del, i
 				blocked = false;
 			}
 		}
-		//if (break_cnt > 0) break;
+		if (break_cnt > 0) break;
 	}
-
+	__syncthreads();
 	if(threadIdx.x == 0) {
-		if(DEBUG) printf("max = %d, max_i = %d, max_j = %d, max_ie = %d, gscore = %d, max_off = %d\n",\
-				max, max_i, max_j, max_ie, gscore, max_off);
+		*d_max = max;
+		*d_max_i = max_i;
+		*d_max_j = max_j;
+		*d_max_ie = max_ie;
+		*d_gscore = gscore;
+		*d_max_off = max_off;
 	}
 }
 
-int main(void)
+int main(int argc, char *argv[])
 {
-	int i;
+	int tlen = TLEN;
+	int qlen = QLEN;
+	int num = NUM;
+	int i, j, k, l, c;
 	int8_t mat[MATH_SIZE * MATH_SIZE];
-
-	char c_query[QLEN + 1] = QSTRING;
-	char c_target[TLEN + 1] = TSTRING;
-
 	uint8_t *query, *target;
+
+	while ((c = getopt(argc, argv, "t:q:n:")) >= 0) {
+			if (c == 't') tlen = atoi(optarg);
+			else if (c == 'q') qlen = atoi(optarg);
+			else if (c == 'n') num = atoi(optarg);
+			else return 1;
+	}
+
+	query = (uint8_t*)malloc(qlen);
+	target = (uint8_t*)malloc(tlen);
 
 	bwa_fill_scmat(A, B, mat);
 
-	for (i = 0; i < QLEN; ++i) // convert to 2-bit encoding if we have not done so
-		c_query[i] = c_query[i] < 4? c_query[i] : nst_nt4_table[(int)c_query[i]];
-	for (i = 0; i < TLEN; ++i) // convert to 2-bit encoding if we have not done so
-		c_target[i] = c_target[i] < 4? c_target[i] : nst_nt4_table[(int)c_target[i]];
+	int h0 = H0;
+	int w = W;
 
-	query = (uint8_t*)&c_query[0];
-	target = (uint8_t*)&c_target[0];
+	int32_t *h;
+	int8_t *qp; // query profile
 
-	int GPU;
-	printf("GPU (1) or CPU (0): ");
-	scanf("%d", &GPU);
+	int	oe_del = O_DEL + E_DEL; // opening and ending deletion
+	int	oe_ins = O_INS + E_INS; // opening and ending insertion
+	int max, max_i, max_j, max_ins, max_del, max_ie, gscore, max_off;
+	int passes, t_lastp; // number of passes and number of thread active in the last pass
 
-	if(GPU) {
-		int h0 = H0;
-		int w = W;
+	srand(time(0));
+	for(l = 0; l < num; l++) {
+		// random query and qlen
+		printf("TEST %d:\nQUERY:\n", l);
+		for(c = 0; c < qlen; c++) {
+			query[c] = rand() % RANGE;
+			printf("%d, ", query[c]);
+		}
+		printf("\nTARGET:\n");
+		for(c = 0; c < tlen; c++) {
+			target[c] = rand() % RANGE;
+			printf("%d, ", target[c]);
+		}
 
-		int32_t *h;
-		int8_t *qp; // query profile
-		int i, j, k;
-		int	oe_del = O_DEL + E_DEL; // opening and ending deletion
-		int	oe_ins = O_INS + E_INS; // opening and ending insertion
-		int max, max_i, max_j, max_ins, max_del, max_ie, gscore, max_off;
-		int passes, t_lastp; // number of passes and number of thread active in the last pass
 		// allocate memory
-		qp = (int8_t*)malloc(QLEN * MATH_SIZE);
-		h = (int32_t*)calloc(QLEN + 1, sizeof(int32_t));
+		qp = (int8_t*)malloc(qlen * MATH_SIZE);
+		h = (int32_t*)calloc(qlen + 1, sizeof(int32_t));
 
 		// generate the query profile
 		for (k = i = 0; k < MATH_SIZE; ++k) {
 			const int8_t *p = &mat[k * MATH_SIZE];
-			for (j = 0; j < QLEN; ++j) {
+			for (j = 0; j < qlen; ++j) {
 				qp[i++] = p[query[j]];
 			}
 		}
 		// fill the first row
 		h[0] = h0; h[1] = h0 > oe_ins? h0 - oe_ins : 0;
-		for (j = 2; j <= QLEN && h[j-1] > E_INS; ++j) {
+		for (j = 2; j <= qlen && h[j-1] > E_INS; ++j) {
 			h[j] = h[j - 1] - E_INS;
 		}
 		// adjust $w if it is too large
 		k = MATH_SIZE * MATH_SIZE;
 		for (i = 0, max = 0; i < k; ++i) // get the max score
 			max = max > mat[i]? max : mat[i];
-		max_ins = (int)((double)(QLEN * max + END_BONUS - O_INS) / E_INS + 1.);
+		max_ins = (int)((double)(qlen * max + END_BONUS - O_INS) / E_INS + 1.);
 		max_ins = max_ins > 1? max_ins : 1;
 		w = w < max_ins? w : max_ins;
-		max_del = (int)((double)(QLEN * max + END_BONUS - O_DEL) / E_DEL + 1.);
+		max_del = (int)((double)(qlen * max + END_BONUS - O_DEL) / E_DEL + 1.);
 		max_del = max_del > 1? max_del : 1;
-		w = w < max_del? w : max_del; // TODO: is this necessary?
-		// DP loop
+		w = w < max_del? w : max_del;
 		max = h0, max_i = max_j = -1; max_ie = -1, gscore = -1; max_off = 0;
 
 		// Initialize
@@ -357,8 +344,8 @@ int main(void)
 		int8_t *d_qp;
 		uint8_t *d_target;
 
-		passes = (int)((double)TLEN / (double)WARP + 1.);
-		t_lastp = TLEN - (TLEN / WARP) * WARP;
+		passes = (int)((double)tlen / (double)WARP + 1.);
+		t_lastp = tlen - (tlen / WARP) * WARP;
 
 		// gpuErrchk(cudaDeviceSetLimit(cudaLimitMallocHeapSize, FIXED_HEAP * ONE_MBYTE));
 		// Allocate device memory
@@ -369,19 +356,19 @@ int main(void)
 		gpuErrchk(cudaMalloc(&d_gscore, sizeof(int)));
 		gpuErrchk(cudaMalloc(&d_max_off, sizeof(int)));
 
-		gpuErrchk(cudaMalloc(&d_h, sizeof(int32_t) * (QLEN + 1)));
-		gpuErrchk(cudaMalloc(&d_qp, sizeof(int8_t) * QLEN * MATH_SIZE));
-		gpuErrchk(cudaMalloc(&d_target, sizeof(uint8_t) * TLEN));
+		gpuErrchk(cudaMalloc(&d_h, sizeof(int32_t) * (qlen + 1)));
+		gpuErrchk(cudaMalloc(&d_qp, sizeof(int8_t) * qlen * MATH_SIZE));
+		gpuErrchk(cudaMalloc(&d_target, sizeof(uint8_t) * tlen));
 		// Transfer data to GPU
-		gpuErrchk(cudaMemcpy(d_h, h, sizeof(int32_t) * (QLEN + 1), cudaMemcpyHostToDevice));
-		gpuErrchk(cudaMemcpy(d_qp, qp, sizeof(int8_t) * QLEN * MATH_SIZE, cudaMemcpyHostToDevice));
-		gpuErrchk(cudaMemcpy(d_target, target, sizeof(uint8_t) * TLEN, cudaMemcpyHostToDevice));
+		gpuErrchk(cudaMemcpy(d_h, h, sizeof(int32_t) * (qlen + 1), cudaMemcpyHostToDevice));
+		gpuErrchk(cudaMemcpy(d_qp, qp, sizeof(int8_t) * qlen * MATH_SIZE, cudaMemcpyHostToDevice));
+		gpuErrchk(cudaMemcpy(d_target, target, sizeof(uint8_t) * tlen, cudaMemcpyHostToDevice));
 		// The kernel
 
-		printf("Passes = %d, t_lastp = %d\n", passes, t_lastp);
-		sw_kernel<<<1, WARP, 2 * (QLEN + 1) * sizeof(int32_t) + QLEN * MATH_SIZE * sizeof(int8_t)>>>\
-				(w, oe_ins, E_INS, O_DEL, E_DEL, oe_del, MATH_SIZE, \
-				TLEN, QLEN, passes, t_lastp, h0, ZDROP, \
+		sw_kernel<<<1, WARP, 2 * (qlen + 1) * sizeof(int32_t) + qlen * MATH_SIZE * sizeof(int8_t)>>>\
+				(d_max, d_max_j, d_max_i, d_max_ie, d_gscore, d_max_off, \
+				w, oe_ins, E_INS, O_DEL, E_DEL, oe_del, MATH_SIZE, \
+				tlen, qlen, passes, t_lastp, h0, ZDROP, \
 				d_h, d_qp, d_target);
 
 		gpuErrchk(cudaPeekAtLastError());
@@ -391,11 +378,12 @@ int main(void)
 		free(h); free(qp);
 		// Get the result back from kernel
 		gpuErrchk(cudaMemcpy(&max, d_max, sizeof(int), cudaMemcpyDeviceToHost));
-		gpuErrchk(cudaMemcpy(&max_j, d_max_j, sizeof(int), cudaMemcpyDeviceToHost));
 		gpuErrchk(cudaMemcpy(&max_i, d_max_i, sizeof(int), cudaMemcpyDeviceToHost));
+		gpuErrchk(cudaMemcpy(&max_j, d_max_j, sizeof(int), cudaMemcpyDeviceToHost));
 		gpuErrchk(cudaMemcpy(&max_ie, d_max_ie, sizeof(int), cudaMemcpyDeviceToHost));
 		gpuErrchk(cudaMemcpy(&gscore, d_gscore, sizeof(int), cudaMemcpyDeviceToHost));
 		gpuErrchk(cudaMemcpy(&max_off, d_max_off, sizeof(int), cudaMemcpyDeviceToHost));
+
 		// Deallocate CUDA variables
 		gpuErrchk(cudaFree(d_max_j));
 		gpuErrchk(cudaFree(d_max_i));
@@ -407,8 +395,16 @@ int main(void)
 		gpuErrchk(cudaFree(d_qp));
 		gpuErrchk(cudaFree(d_target));
 
-	} else ksw_extend2(QLEN, &query[0], TLEN, &target[0], MATH_SIZE, mat, \
+		int cmax, cmax_i, cmax_j, cmax_ie, cgscore, cmax_off;
+		cmax = ksw_extend2(&cmax_i, &cmax_j, &cmax_ie, &cgscore, &cmax_off, \
+				qlen, &query[0], tlen, &target[0], MATH_SIZE, mat, \
 				O_DEL, E_DEL, O_INS, E_INS, W, END_BONUS, ZDROP, H0);
+
+		if(cmax == max && cmax_i == max_i && cmax_j == max_j && \
+				cmax_ie == max_ie && gscore == cgscore && max_off == cmax_off)
+			printf("\nTEST %d PASSED.\n", l);
+		else printf("\nTEST %d FAILED.\n", l);
+	}
 
 	return 0;
 }
@@ -416,12 +412,10 @@ int main(void)
 /********************
  *** SW extension ***
  ********************/
-int ksw_extend2(int qlen, const uint8_t *query, int tlen, const uint8_t *target, int m, const int8_t *mat, \
+int ksw_extend2(int *cmax_i, int *cmax_j, int *cmax_ie, int *cgscore, int *cmax_off, \
+		int qlen, const uint8_t *query, int tlen, const uint8_t *target, int m, const int8_t *mat, \
 		int o_del, int e_del, int o_ins, int e_ins, int w, int end_bonus, int zdrop, int h0)
 {
-	printf("m = %d, o_del = %d, e_del = %d, o_ins = %d, e_ins = %d, w = %d, "
-			"end_bonus = %d, zdrop = %d, h0 = %d\n", m, o_del, e_del, o_ins, e_ins, \
-			w, end_bonus, zdrop, h0);
 	eh_t *eh; // score array
 	int8_t *qp; // query profile
 	int i, j, k, \
@@ -450,8 +444,7 @@ int ksw_extend2(int qlen, const uint8_t *query, int tlen, const uint8_t *target,
 	w = w < max_ins? w : max_ins;
 	max_del = (int)((double)(qlen * max + end_bonus - o_del) / e_del + 1.);
 	max_del = max_del > 1? max_del : 1;
-	w = w < max_del? w : max_del; // TODO: is this necessary?
-	// DP loop
+	w = w < max_del? w : max_del;
 	max = h0, max_i = max_j = -1; max_ie = -1, gscore = -1;
 	max_off = 0;
 	beg = 0, end = qlen;
@@ -467,7 +460,6 @@ int ksw_extend2(int qlen, const uint8_t *query, int tlen, const uint8_t *target,
 			h1 = h0 - (o_del + e_del * (i + 1));
 			if (h1 < 0) h1 = 0;
 		} else h1 = 0;
-		// TODO: Try converting this loop, might work
 		for (j = beg; LIKELY(j < end); ++j) {
 			// At the beginning of the loop: eh[j] = { H(i-1,j-1), E(i,j) }, f = F(i,j) and h1 = H(i,j-1)
 			// Similar to SSE2-SW, cells are computed in the following order:
@@ -519,8 +511,12 @@ int ksw_extend2(int qlen, const uint8_t *query, int tlen, const uint8_t *target,
 		//beg = 0; end = qlen; // uncomment this line for debugging
 	}
 	free(eh); free(qp);
-	if(DEBUG) printf("[CPU:] max = %d, max_j = %d, max_i = %d, max_ie = %d, "
-			"gscore = %d, max_off = %d\n", max, max_j, max_i, max_ie, gscore, max_off);
+
+	*cmax_i = max_i;
+	*cmax_j = max_j;
+	*cmax_ie = max_ie;
+	*cgscore = gscore;
+	*cmax_off = max_off;
 	return max;
 }
 
