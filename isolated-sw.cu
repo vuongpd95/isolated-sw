@@ -31,7 +31,7 @@
 #define END_BONUS 5
 #define ZDROP 100
 #define H0 200
-#define THREAD_CHECK 0
+#define THREAD_CHECK 4
 
 typedef struct {
 	int32_t h, e;
@@ -141,11 +141,11 @@ void sw_kernel(int w, int oe_ins, int e_ins, int o_del, int e_del, int oe_del, i
 			if (h1 < 0) h1 = 0;
 		} else h1 = 0;
 
-		if(threadIdx.x == THREAD_CHECK) {
-			for(int k = 0; k <= qlen; k++) {
-				printf("h[%d] = %d, e[%d] = %d\n", k, sh[k], k, se[k]);
-			}
-		}
+//		if(threadIdx.x == THREAD_CHECK) {
+//			for(int k = 0; k <= qlen; k++) {
+//				printf("h[%d] = %d, e[%d] = %d\n", k, sh[k], k, se[k]);
+//			}
+//		}
 		__syncthreads();
 
 		 while(beg < end) {
@@ -253,21 +253,21 @@ void sw_kernel(int w, int oe_ins, int e_ins, int o_del, int e_del, int oe_del, i
 		}
 		//if (break_cnt > 0) break;
 	}
-
-	if(threadIdx.x == 0) {
+	__syncthreads();
+	if(threadIdx.x == THREAD_CHECK) {
 		if(DEBUG) printf("max = %d, max_i = %d, max_j = %d, max_ie = %d, gscore = %d, max_off = %d\n",\
 				max, max_i, max_j, max_ie, gscore, max_off);
 	}
 }
 
-#define TLEN 10
-#define QLEN 10
+#define TLEN 50
+#define QLEN 50
 int main(void)
 {
 	int8_t mat[MATH_SIZE * MATH_SIZE];
 
-	uint8_t cquery[TLEN] = {0, 3, 0, 3, 0, 3, 1, 0, 2, 3};
-	uint8_t ctarget[QLEN] = {2, 1, 2, 3, 0, 3, 1, 3, 2, 1};
+	uint8_t cquery[TLEN] = {1, 1, 3, 2, 2, 0, 1, 2, 0, 1, 2, 2, 3, 1, 3, 3, 2, 0, 3, 3, 1, 1, 2, 0, 3, 3, 1, 2, 2, 2, 0, 3, 3, 3, 2, 1, 0, 3, 0, 0, 0, 2, 3, 3, 0, 2, 2, 2, 2, 1};
+	uint8_t ctarget[QLEN] = {2, 3, 2, 0, 0, 1, 3, 1, 3, 1, 3, 3, 0, 2, 3, 2, 3, 3, 1, 3, 3, 1, 2, 2, 0, 2, 0, 2, 0, 3, 3, 2, 2, 1, 2, 2, 2, 1, 3, 2, 2, 2, 1, 3, 0, 0, 1, 0, 3, 3};
 
 	uint8_t *query = &cquery[0];
 	uint8_t* target = &ctarget[0];
@@ -391,9 +391,6 @@ int main(void)
 int ksw_extend2(int qlen, const uint8_t *query, int tlen, const uint8_t *target, int m, const int8_t *mat, \
 		int o_del, int e_del, int o_ins, int e_ins, int w, int end_bonus, int zdrop, int h0)
 {
-	printf("m = %d, o_del = %d, e_del = %d, o_ins = %d, e_ins = %d, w = %d, "
-			"end_bonus = %d, zdrop = %d, h0 = %d\n", m, o_del, e_del, o_ins, e_ins, \
-			w, end_bonus, zdrop, h0);
 	eh_t *eh; // score array
 	int8_t *qp; // query profile
 	int i, j, k, \
@@ -439,7 +436,6 @@ int ksw_extend2(int qlen, const uint8_t *query, int tlen, const uint8_t *target,
 			h1 = h0 - (o_del + e_del * (i + 1));
 			if (h1 < 0) h1 = 0;
 		} else h1 = 0;
-		// TODO: Try converting this loop, might work
 		for (j = beg; LIKELY(j < end); ++j) {
 			// At the beginning of the loop: eh[j] = { H(i-1,j-1), E(i,j) }, f = F(i,j) and h1 = H(i,j-1)
 			// Similar to SSE2-SW, cells are computed in the following order:
@@ -448,10 +444,12 @@ int ksw_extend2(int qlen, const uint8_t *query, int tlen, const uint8_t *target,
 			//   F(i,j+1) = max{H(i,j)-gapo, F(i,j)} - gape
 			eh_t *p = &eh[j];
 			int h, M = p->h, e = p->e; // get H(i-1,j-1) and E(i-1,j)
+			if(DEBUG) printf("j = %d, M = %d, h1 = %d\n", j, M, h1);
 			p->h = h1;          // set H(i,j-1) for the next row
 			M = M? M + q[j] : 0;// separating H and M to disallow a cigar like "100M3I3D20M"
 			h = M > e? M : e;   // e and f are guaranteed to be non-negative, so h>=0 even if M<0
 			h = h > f? h : f;
+			if(DEBUG) printf("j = %d, h = %d\n", j, h);
 			h1 = h;             // save H(i,j) to h1 for the next column
 			mj = m > h? mj : j; // record the position where max score is achieved
 			m = m > h? m : h;   // m is stored at eh[mj+1]
@@ -464,6 +462,8 @@ int ksw_extend2(int qlen, const uint8_t *query, int tlen, const uint8_t *target,
 			t = t > 0? t : 0;
 			f -= e_ins;
 			f = f > t? f : t;   // computed F(i,j+1)
+			if(DEBUG) printf("j = %d, M = %d, h = %d, h1 = %d, e = %d, f = %d, t = %d\n", \
+				j, M, h, h1, e, f, t);
 		}
 		eh[end].h = h1; eh[end].e = 0;
 		if (j == qlen) {
@@ -491,8 +491,8 @@ int ksw_extend2(int qlen, const uint8_t *query, int tlen, const uint8_t *target,
 		//beg = 0; end = qlen; // uncomment this line for debugging
 	}
 	free(eh); free(qp);
-	if(DEBUG) printf("[CPU:] max = %d, max_j = %d, max_i = %d, max_ie = %d, "
-			"gscore = %d, max_off = %d\n", max, max_j, max_i, max_ie, gscore, max_off);
+	if(DEBUG) printf("max = %d, max_i = %d, max_j = %d, max_ie = %d, "
+			"gscore = %d, max_off = %d\n", max, max_i, max_j, max_ie, gscore, max_off);
 	return max;
 }
 
