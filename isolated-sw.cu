@@ -31,7 +31,7 @@
 #define END_BONUS 5
 #define ZDROP 100
 #define H0 200
-
+#define THREAD_CHECK 1
 #define TLEN 5
 #define QLEN 5
 #define QSTRING "ACGTG"
@@ -134,7 +134,9 @@ void sw_kernel(int w, int oe_ins, int e_ins, int o_del, int e_del, int oe_del, i
 			se[i] = 0;
 		}
 		// qlen > 1, m = 5, qlen * m always bigger than qlen + 1
-		if(i < qlen * m) sqp[i] = qp[i];
+		if(i < qlen * m) {
+			sqp[i] = qp[i];
+		}
 		else break;
 		i += WARP;
 	}
@@ -149,8 +151,8 @@ void sw_kernel(int w, int oe_ins, int e_ins, int o_del, int e_del, int oe_del, i
 		beg = 0; end = qlen;
 
 		int t, row_i, f = 0, h1, local_m = 0, mj = -1;
-		int8_t *q = &sqp[target[i] * qlen];
 		row_i = i * WARP + threadIdx.x;
+		int8_t *q = &sqp[target[row_i] * qlen];
 		// apply the band and the constraint (if provided)
 		if (beg < row_i - w) beg = row_i - w;
 		if (end > row_i + w + 1) end = row_i + w + 1;
@@ -175,43 +177,63 @@ void sw_kernel(int w, int oe_ins, int e_ins, int o_del, int e_del, int oe_del, i
 			__syncthreads();
 			if(check_active(in_h, in_e)) {
 				int local_h;
+				if(threadIdx.x == THREAD_CHECK)
+					printf("j = %d, M = %d, h1 = %d\n", beg, in_h, h1);
 
 				out_h[threadIdx.x] = h1;
 				if(i != passes - 1) sh[beg] = h1;
 
-				in_h = in_h? in_h + q[beg] : 0;
-				local_h = in_h > in_e? in_h : in_e;
-				local_h = local_h > f? local_h : f;
+				//in_h = in_h? in_h + q[beg] : 0;
+				if(in_h) in_h = in_h + q[beg];
+				else in_h = 0;
+
+				// local_h = in_h > in_e? in_h : in_e;
+				if(in_h > in_e) local_h = in_h;
+				else local_h = in_e;
+
+				// local_h = local_h > f? local_h : f;
+				if(local_h < f) local_h = f;
+
+				if(threadIdx.x == THREAD_CHECK)
+					printf("j = %d, h = %d, q[%d] = %d\n", beg, local_h, beg, q[beg]);
 				h1 = local_h;
 
-				mj = local_m > local_h? mj : beg;
-				local_m = local_m > local_h? local_m : local_h;
+				// mj = local_m > local_h? mj : beg;
+				if(local_m <= local_h) mj = beg;
+				//local_m = local_m > local_h? local_m : local_h;
+				if(local_m < local_h) local_m = local_h;
 
 				t = in_h - oe_del;
-				t = t > 0? t : 0;
+				//t = t > 0? t : 0;
+				if(t < 0) t = 0;
 				in_e -= e_del;
-				in_e = in_e > t? in_e : t;
-
+				//in_e = in_e > t? in_e : t;
+				if(in_e < t) in_e = t;
 				out_e[threadIdx.x] = in_e;
 				if(i != passes - 1) se[beg] = in_e;
 
 				t = in_h - oe_ins;
-				t = t > 0? t : 0;
+				//t = t > 0? t : 0;
+				if(t < 0) t = 0;
 				f -= e_ins;
-				f = f > t? f : t;
-
+				//f = f > t? f : t;
+				if(f < t) f = t;
+				if(threadIdx.x == THREAD_CHECK)
+					printf("j = %d, M = %d, h = %d, h1 = %d, e = %d, f = %d, t = %d\n", \
+							beg, in_h, local_h, h1, in_e, f, t);
 				reset(&in_h, &in_e);
 				beg += 1;
 			}
 			__syncthreads();
 		};
 
-		if(threadIdx.x != active_ts - 1) {
+		if(threadIdx.x == active_ts - 1) {
 			out_h[threadIdx.x] = h1;
 			out_e[threadIdx.x] = 0;
-		} else if(i != passes - 1) {
-			sh[end] = h1;
-			se[end] = 0;
+			if(i != passes - 1) {
+				sh[end] = h1;
+				se[end] = 0;
+			}
 		}
 
 		__syncthreads();
@@ -300,7 +322,10 @@ int main(void)
 		// generate the query profile
 		for (k = i = 0; k < MATH_SIZE; ++k) {
 			const int8_t *p = &mat[k * MATH_SIZE];
-			for (j = 0; j < QLEN; ++j) qp[i++] = p[query[j]];
+			for (j = 0; j < QLEN; ++j) {
+				printf("query[%d] = %d ", j, query[j]);
+				qp[i++] = p[query[j]];
+			}
 		}
 		// fill the first row
 		h[0] = h0; h[1] = h0 > oe_ins? h0 - oe_ins : 0;
