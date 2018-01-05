@@ -15,7 +15,7 @@
 #include <inttypes.h>
 #include <assert.h>
 
-#define WARP 5
+#define WARP 1024
 #define LIKELY(x) __builtin_expect((x),1)
 #define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 
