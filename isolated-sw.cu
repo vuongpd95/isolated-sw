@@ -266,8 +266,8 @@ int main(void)
 {
 	int8_t mat[MATH_SIZE * MATH_SIZE];
 
-	uint8_t cquery[10] = {0, 3, 0, 3, 0, 3, 1, 0, 2, 3};
-	uint8_t ctarget[10] = {2, 1, 2, 3, 0, 3, 1, 3, 2, 1};
+	uint8_t cquery[TLEN] = {0, 3, 0, 3, 0, 3, 1, 0, 2, 3};
+	uint8_t ctarget[QLEN] = {2, 1, 2, 3, 0, 3, 1, 3, 2, 1};
 
 	uint8_t *query = &cquery[0];
 	uint8_t* target = &ctarget[0];
