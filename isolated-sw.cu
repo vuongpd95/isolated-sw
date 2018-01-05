@@ -15,7 +15,7 @@
 #include <inttypes.h>
 #include <assert.h>
 
-#define WARP 1024
+#define WARP 5
 #define LIKELY(x) __builtin_expect((x),1)
 #define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 
@@ -148,7 +148,7 @@ void sw_kernel(int w, int oe_ins, int e_ins, int o_del, int e_del, int oe_del, i
 		reset(&out_h[threadIdx.x], &out_e[threadIdx.x]);
 		beg = 0; end = qlen;
 
-		int t, row_i, f = 0, h1, m = 0, mj = -1;
+		int t, row_i, f = 0, h1, local_m = 0, mj = -1;
 		int8_t *q = &sqp[target[i] * qlen];
 		row_i = i * WARP + threadIdx.x;
 		// apply the band and the constraint (if provided)
@@ -164,7 +164,7 @@ void sw_kernel(int w, int oe_ins, int e_ins, int o_del, int e_del, int oe_del, i
 
 		__syncthreads();
 
-		do {
+		 while(beg < end) {
 			if(threadIdx.x == 0) {
 				in_h = sh[beg];
 				in_e = se[beg];
@@ -174,35 +174,37 @@ void sw_kernel(int w, int oe_ins, int e_ins, int o_del, int e_del, int oe_del, i
 			}
 			__syncthreads();
 			if(check_active(in_h, in_e)) {
-				int h;
-				if(threadIdx.x != active_ts - 1) out_h[threadIdx.x] = h1;
-				else if(i != passes - 1) sh[beg] = h1;
-				in_h = in_h? in_h + q[beg] : 0;
-				h = in_h > in_e? in_h : in_e;
-				h = h > f? h : f;
-				h1 = h;
+				int local_h;
 
-				mj = m > h? mj : beg;
-				m = m > h? m : h;
+				out_h[threadIdx.x] = h1;
+				if(i != passes - 1) sh[beg] = h1;
+
+				in_h = in_h? in_h + q[beg] : 0;
+				local_h = in_h > in_e? in_h : in_e;
+				local_h = local_h > f? local_h : f;
+				h1 = local_h;
+
+				mj = local_m > local_h? mj : beg;
+				local_m = local_m > local_h? local_m : local_h;
 
 				t = in_h - oe_del;
 				t = t > 0? t : 0;
 				in_e -= e_del;
 				in_e = in_e > t? in_e : t;
 
-				if(threadIdx.x != active_ts - 1) out_e[threadIdx.x] = in_e;
-				else if(i != passes - 1) sh[beg] = in_e;
+				out_e[threadIdx.x] = in_e;
+				if(i != passes - 1) se[beg] = in_e;
 
 				t = in_h - oe_ins;
 				t = t > 0? t : 0;
 				f -= e_ins;
-				f = f > t? f : t;  	 							// computed F(i,j+1)
+				f = f > t? f : t;
 
 				reset(&in_h, &in_e);
 				beg += 1;
 			}
 			__syncthreads();
-		} while(beg < end);
+		};
 
 		if(threadIdx.x != active_ts - 1) {
 			out_h[threadIdx.x] = h1;
@@ -213,14 +215,14 @@ void sw_kernel(int w, int oe_ins, int e_ins, int o_del, int e_del, int oe_del, i
 		}
 
 		__syncthreads();
-		if (row_i == 4) printf("Thread %d, row_i = %d, out_h[%d] = %d\n", \
-				threadIdx.x, row_i, threadIdx.x, h1);
+
 		while(blocked) {
 			if(0 == atomicCAS(&mLock, 0, 1)) {
 				// critical section
 				if(beg == qlen) {
 					max_ie = gscore > h1? max_ie : row_i;
 					gscore = gscore > h1? gscore : h1;
+
 				}
 				atomicExch(&mLock, 0);
 				blocked = false;
@@ -228,18 +230,19 @@ void sw_kernel(int w, int oe_ins, int e_ins, int o_del, int e_del, int oe_del, i
 		}
 
 		__syncthreads();
+
 		blocked = true;
 		while(blocked) {
 			if (break_cnt > 0) break;
 			if(0 == atomicCAS(&mLock, 0, 1)) {
-				if(m > max) {
-					max = m, max_i = row_i, max_j = mj;
+				if(local_m > max) {
+					max = local_m, max_i = row_i, max_j = mj;
 					max_off = max_off > abs(mj - row_i)? max_off : abs(mj - row_i);
 				} else if (zdrop > 0) {
 					if (i - max_i > mj - max_j) {
-						if (max - m - ((row_i - max_i) - (mj - max_j)) * e_del > zdrop) break_cnt += 1;
+						if (max - local_m - ((row_i - max_i) - (mj - max_j)) * e_del > zdrop) break_cnt += 1;
 					} else {
-						if (max - m - ((mj - max_j) - (row_i - max_i)) * e_ins > zdrop) break_cnt += 1;
+						if (max - local_m - ((mj - max_j) - (row_i - max_i)) * e_ins > zdrop) break_cnt += 1;
 					}
 				}
 				atomicExch(&mLock, 0);
@@ -467,7 +470,9 @@ int ksw_extend2(int qlen, const uint8_t *query, int tlen, const uint8_t *target,
 		if (j == qlen) {
 			max_ie = gscore > h1? max_ie : i;
 			gscore = gscore > h1? gscore : h1;
+
 		}
+
 		if (m == 0) break;
 		if (m > max) {
 			max = m, max_i = i, max_j = mj;
