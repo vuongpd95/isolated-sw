@@ -31,11 +31,11 @@
 #define END_BONUS 5
 #define ZDROP 100
 #define H0 200
-#define THREAD_CHECK 1
-#define TLEN 5
-#define QLEN 5
-#define QSTRING "ACGTG"
-#define TSTRING "AGGCG"
+#define THREAD_CHECK 0
+#define QLEN 61
+#define TLEN 66
+#define QSTRING "GGGGGGGGGGGACGTAGGGGGAAAGGGGGGGGGGgTGgggggAAAgggggggTTCCTTTTT"
+#define TSTRING "GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGACGTG"
 
 typedef struct {
 	int32_t h, e;
@@ -164,6 +164,11 @@ void sw_kernel(int w, int oe_ins, int e_ins, int o_del, int e_del, int oe_del, i
 			if (h1 < 0) h1 = 0;
 		} else h1 = 0;
 
+		if(threadIdx.x == THREAD_CHECK) {
+			for(int k = 0; k <= qlen; k++) {
+				printf("h[%d] = %d, e[%d] = %d\n", k, sh[k], k, se[k]);
+			}
+		}
 		__syncthreads();
 
 		 while(beg < end) {
@@ -195,7 +200,7 @@ void sw_kernel(int w, int oe_ins, int e_ins, int o_del, int e_del, int oe_del, i
 				if(local_h < f) local_h = f;
 
 				if(threadIdx.x == THREAD_CHECK)
-					printf("j = %d, h = %d, q[%d] = %d\n", beg, local_h, beg, q[beg]);
+					printf("j = %d, h = %d\n", beg, local_h);
 				h1 = local_h;
 
 				// mj = local_m > local_h? mj : beg;
@@ -226,7 +231,6 @@ void sw_kernel(int w, int oe_ins, int e_ins, int o_del, int e_del, int oe_del, i
 			}
 			__syncthreads();
 		};
-
 		if(threadIdx.x == active_ts - 1) {
 			out_h[threadIdx.x] = h1;
 			out_e[threadIdx.x] = 0;
@@ -238,19 +242,18 @@ void sw_kernel(int w, int oe_ins, int e_ins, int o_del, int e_del, int oe_del, i
 
 		__syncthreads();
 
+		blocked = true;
 		while(blocked) {
 			if(0 == atomicCAS(&mLock, 0, 1)) {
 				// critical section
 				if(beg == qlen) {
 					max_ie = gscore > h1? max_ie : row_i;
 					gscore = gscore > h1? gscore : h1;
-
 				}
 				atomicExch(&mLock, 0);
 				blocked = false;
 			}
 		}
-
 		__syncthreads();
 
 		blocked = true;
@@ -323,7 +326,6 @@ int main(void)
 		for (k = i = 0; k < MATH_SIZE; ++k) {
 			const int8_t *p = &mat[k * MATH_SIZE];
 			for (j = 0; j < QLEN; ++j) {
-				printf("query[%d] = %d ", j, query[j]);
 				qp[i++] = p[query[j]];
 			}
 		}
