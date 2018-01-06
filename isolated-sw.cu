@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <inttypes.h>
 #include <assert.h>
+#include <getopt.h>
 
 #define WARP 1024
 #define LIKELY(x) __builtin_expect((x),1)
@@ -69,7 +70,8 @@ __device__ int mLock = 0;
 extern __shared__ int32_t container[];
 
 __global__
-void sw_kernel(int tcheck, int w, int oe_ins, int e_ins, int o_del, int e_del, int oe_del, int m, \
+void sw_kernel(int *d_max, int *d_max_i, int *d_max_j, int *d_max_ie, int *d_gscore, int *d_max_off, \
+		int tcheck, int w, int oe_ins, int e_ins, int o_del, int e_del, int oe_del, int m, \
 		int tlen, int qlen, int passes, int t_lastp, int h0, int zdrop, \
 		int32_t *h, int8_t *qp, const uint8_t *target)
 {
@@ -258,12 +260,27 @@ void sw_kernel(int tcheck, int w, int oe_ins, int e_ins, int o_del, int e_del, i
 //		printf("max = %d, max_i = %d, max_j = %d, max_ie = %d, gscore = %d, max_off = %d\n",\
 //				max, max_i, max_j, max_ie, gscore, max_off);
 //	}
+	if(threadIdx.x == tcheck) {
+		*d_max = max;
+		*d_max_i = max_i;
+		*d_max_j = max_j;
+		*d_max_ie = max_ie;
+		*d_gscore = gscore;
+		*d_max_off = max_off;
+	}
 }
 
 #define TLEN 50
 #define QLEN 50
-int main(void)
+int main(int argc, char *argv[])
 {
+	int c, GPU = 1, tcheck = THREAD_CHECK;
+	while ((c = getopt(argc, argv, "t:g:")) >= 0) {
+				if (c == 't') tcheck = atoi(optarg);
+				else if (c == 'g') GPU = atoi(optarg);
+				else return 1;
+	}
+
 	int8_t mat[MATH_SIZE * MATH_SIZE];
 
 	uint8_t cquery[TLEN] = {1, 1, 3, 2, 2, 0, 1, 2, 0, 1, 2, 2, 3, 1, 3, 3, 2, 0, 3, 3, 1, 1, 2, 0, 3, 3, 1, 2, 2, 2, 0, 3, 3, 3, 2, 1, 0, 3, 0, 0, 0, 2, 3, 3, 0, 2, 2, 2, 2, 1};
@@ -273,13 +290,6 @@ int main(void)
 	uint8_t* target = &ctarget[0];
 
 	bwa_fill_scmat(A, B, mat);
-
-
-	int GPU, tcheck = THREAD_CHECK;
-//	printf("GPU (1) or CPU (0): ");
-	scanf("%d", &GPU);
-//	printf("tcheck: ");
-	scanf("%d", &tcheck);
 
 	if(GPU) {
 		int h0 = H0;
@@ -354,7 +364,8 @@ int main(void)
 
 //		if(DEBUG) printf("Passes = %d, t_lastp = %d\n", passes, t_lastp);
 		sw_kernel<<<1, WARP, 2 * (QLEN + 1) * sizeof(int32_t) + QLEN * MATH_SIZE * sizeof(int8_t)>>>\
-				(tcheck, w, oe_ins, E_INS, O_DEL, E_DEL, oe_del, MATH_SIZE, \
+				(d_max, d_max_i, d_max_j, d_max_ie, d_gscore, d_max_off, \
+				tcheck, w, oe_ins, E_INS, O_DEL, E_DEL, oe_del, MATH_SIZE, \
 				TLEN, QLEN, passes, t_lastp, h0, ZDROP, \
 				d_h, d_qp, d_target);
 
@@ -380,6 +391,8 @@ int main(void)
 		gpuErrchk(cudaFree(d_h));
 		gpuErrchk(cudaFree(d_qp));
 		gpuErrchk(cudaFree(d_target));
+		if(DEBUG) printf("max = %d, max_i = %d, max_j = %d, max_ie = %d, gscore = %d, max_off = %d\n",\
+						max, max_i, max_j, max_ie, gscore, max_off);
 
 	} else ksw_extend2(QLEN, &query[0], TLEN, &target[0], MATH_SIZE, mat, \
 				O_DEL, E_DEL, O_INS, E_INS, W, END_BONUS, ZDROP, H0);
