@@ -276,9 +276,9 @@ void sw_kernel(int *d_max, int *d_max_i, int *d_max_j, int *d_max_ie, int *d_gsc
 		*d_max_off = max_off;
 	}
 }
-
-#define TLEN 50
 #define QLEN 50
+#define TLEN 33
+
 int main(int argc, char *argv[])
 {
 	int c, GPU = 1, tcheck = THREAD_CHECK, pr = 0;
@@ -291,8 +291,8 @@ int main(int argc, char *argv[])
 
 	int8_t mat[MATH_SIZE * MATH_SIZE];
 
-	uint8_t cquery[TLEN] = {0, 2, 1, 1, 3, 1, 0, 2, 3, 3, 2, 1, 0, 1, 2, 0, 1, 3, 3, 2, 1, 0, 1, 0, 3, 0, 2, 3, 0, 2, 1, 0, 1, 2, 1, 0, 0, 1, 3, 3, 1, 1, 0, 1, 2, 2, 2, 3, 1, 1};
-	uint8_t ctarget[QLEN] = {2, 2, 1, 3, 2, 0, 3, 1, 0, 3, 3, 1, 3, 0, 0, 0, 1, 0, 2, 0, 3, 3, 1, 3, 0, 0, 1, 2, 3, 2, 3, 1, 1, 0, 0, 3, 1, 0, 0, 1, 3, 0, 2, 3, 0, 2, 3, 1, 2, 1};
+	uint8_t cquery[QLEN] = {0, 2, 1, 2, 0, 1, 2, 3, 0, 1, 2, 0, 3, 0, 0, 1, 1, 3, 3, 0, 0, 3, 1, 3, 2, 2, 2, 0, 1, 3, 1, 2, 1, 3, 0, 1, 0, 2, 0, 1, 3, 3, 1, 3, 3, 1, 0, 0, 0, 3};
+	uint8_t ctarget[TLEN] = {1, 0, 2, 2, 0, 1, 0, 2, 1, 2, 1, 3, 0, 2, 2, 0, 3, 2, 2, 0, 3, 1, 3, 1, 0, 2, 2, 1, 3, 3, 0, 0, 3};
 
 	uint8_t *query = &cquery[0];
 	uint8_t* target = &ctarget[0];
