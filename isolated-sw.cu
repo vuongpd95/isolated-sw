@@ -143,11 +143,6 @@ void sw_kernel(int *d_max, int *d_max_i, int *d_max_j, int *d_max_ie, int *d_gsc
 			if (h1 < 0) h1 = 0;
 		} else h1 = 0;
 
-//		if(threadIdx.x == THREAD_CHECK) {
-//			for(int k = 0; k <= qlen; k++) {
-//				printf("h[%d] = %d, e[%d] = %d\n", k, sh[k], k, se[k]);
-//			}
-//		}
 		__syncthreads();
 
 		while(beg < end + 1) {
@@ -175,7 +170,7 @@ void sw_kernel(int *d_max, int *d_max_i, int *d_max_j, int *d_max_ie, int *d_gsc
 			if(check_active(in_h, in_e)) {
 				int local_h;
 				if(threadIdx.x == tcheck && DEBUG == 1)
-				printf("i = %d, j = %d, M = %d, h1 = %d\n", row_i, beg, in_h, h1);
+					printf("i = %d, j = %d, M = %d, h1 = %d\n", row_i, beg, in_h, h1);
 
 				out_h[threadIdx.x] = h1;
 				if(i != passes - 1) sh[beg] = h1;
@@ -192,7 +187,7 @@ void sw_kernel(int *d_max, int *d_max_i, int *d_max_j, int *d_max_ie, int *d_gsc
 				if(local_h < f) local_h = f;
 
 				if(threadIdx.x == tcheck && DEBUG == 1)
-				printf("i = %d, j = %d, h = %d\n", row_i, beg, local_h);
+					printf("i = %d, j = %d, h = %d\n", row_i, beg, local_h);
 				h1 = local_h;
 
 				// mj = local_m > local_h? mj : beg;
@@ -206,6 +201,7 @@ void sw_kernel(int *d_max, int *d_max_i, int *d_max_j, int *d_max_ie, int *d_gsc
 				in_e -= e_del;
 				//in_e = in_e > t? in_e : t;
 				if(in_e < t) in_e = t;
+
 				out_e[threadIdx.x] = in_e;
 				if(i != passes - 1) se[beg] = in_e;
 
@@ -217,7 +213,7 @@ void sw_kernel(int *d_max, int *d_max_i, int *d_max_j, int *d_max_ie, int *d_gsc
 				if(f < t) f = t;
 				if(threadIdx.x == tcheck && DEBUG == 1)
 					printf("i = %d, j = %d, M = %d, h = %d, h1 = %d, e = %d, f = %d, t = %d\n", \
-				row_i, beg, in_h, local_h, h1, in_e, f, t);
+							row_i, beg, in_h, local_h, h1, in_e, f, t);
 				reset(&in_h, &in_e);
 				beg += 1;
 			}
@@ -240,7 +236,6 @@ void sw_kernel(int *d_max, int *d_max_i, int *d_max_j, int *d_max_ie, int *d_gsc
 				blocked = false;
 			}
 		}
-//		__syncthreads();
 
 		blocked = true;
 		while(blocked) {
@@ -262,11 +257,7 @@ void sw_kernel(int *d_max, int *d_max_i, int *d_max_j, int *d_max_ie, int *d_gsc
 		//if (break_cnt > 0) break;
 	}
 	__syncthreads();
-//	if(threadIdx.x == tcheck && DEBUG == 1) {
-//		printf("max = %d, max_i = %d, max_j = %d, max_ie = %d, gscore = %d, max_off = %d\n",\
-//				max, max_i, max_j, max_ie, gscore, max_off);
-//	}
-	if(threadIdx.x == tcheck) {
+	if(threadIdx.x == 0) {
 		*d_max = max;
 		*d_max_i = max_i;
 		*d_max_j = max_j;
