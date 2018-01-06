@@ -150,6 +150,7 @@ void sw_kernel(int *d_max, int *d_max_j, int *d_max_i, int *d_max_ie, int *d_gsc
 		__syncthreads();
 
 		 while(beg < end) {
+			 __syncthreads();
 			if(threadIdx.x == 0) {
 				in_h = sh[beg];
 				in_e = se[beg];
@@ -201,15 +202,12 @@ void sw_kernel(int *d_max, int *d_max_j, int *d_max_i, int *d_max_ie, int *d_gsc
 				reset(&in_h, &in_e);
 				beg += 1;
 			}
-			__syncthreads();
-		};
-		if(threadIdx.x == active_ts - 1) {
-			out_h[threadIdx.x] = h1;
-			out_e[threadIdx.x] = 0;
-			if(i != passes - 1) {
-				sh[end] = h1;
-				se[end] = 0;
-			}
+		}
+		 out_h[threadIdx.x] = h1;
+		 out_e[threadIdx.x] = 0;
+		if(threadIdx.x == active_ts - 1 && i != passes - 1) {
+			sh[end] = h1;
+			se[end] = 0;
 		}
 
 		blocked = true;
@@ -217,21 +215,20 @@ void sw_kernel(int *d_max, int *d_max_j, int *d_max_i, int *d_max_ie, int *d_gsc
 			if(0 == atomicCAS(&mLock, 0, 1)) {
 				// critical section
 				if(beg == qlen) {
-					max_ie = gscore > h1? max_ie : row_i;
-					gscore = gscore > h1? gscore : h1;
+					if(gscore < h1) {
+						max_ie = row_i;
+						gscore = h1;
+					} else if(gscore == h1 && max_ie < row_i) {
+						max_ie = row_i;
+					}
 				}
 				atomicExch(&mLock, 0);
 				blocked = false;
 			}
 		}
 
-		if (m == 0) atomicAdd(&break_cnt, 1);
-		__syncthreads();
-		if (break_cnt > 0) break;
-
 		blocked = true;
 		while(blocked) {
-			if (break_cnt > 0) break;
 			if(0 == atomicCAS(&mLock, 0, 1)) {
 				if(local_m > max) {
 					max = local_m, max_i = row_i, max_j = mj;
@@ -247,7 +244,6 @@ void sw_kernel(int *d_max, int *d_max_j, int *d_max_i, int *d_max_ie, int *d_gsc
 				blocked = false;
 			}
 		}
-		if (break_cnt > 0) break;
 	}
 	__syncthreads();
 	if(threadIdx.x == 0) {
