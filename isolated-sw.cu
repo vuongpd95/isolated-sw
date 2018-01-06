@@ -150,7 +150,8 @@ void sw_kernel(int *d_max, int *d_max_i, int *d_max_j, int *d_max_ie, int *d_gsc
 //		}
 		__syncthreads();
 
-		 while(beg < end) {
+		while(beg < end) {
+			__syncthreads();
 			if(threadIdx.x == 0) {
 				in_h = sh[beg];
 				in_e = se[beg];
@@ -162,7 +163,7 @@ void sw_kernel(int *d_max, int *d_max_i, int *d_max_j, int *d_max_ie, int *d_gsc
 			if(check_active(in_h, in_e)) {
 				int local_h;
 				if(threadIdx.x == tcheck && DEBUG == 1)
-					printf("i = %d, j = %d, M = %d, h1 = %d\n", row_i, beg, in_h, h1);
+				printf("i = %d, j = %d, M = %d, h1 = %d\n", row_i, beg, in_h, h1);
 
 				out_h[threadIdx.x] = h1;
 				if(i != passes - 1) sh[beg] = h1;
@@ -179,7 +180,7 @@ void sw_kernel(int *d_max, int *d_max_i, int *d_max_j, int *d_max_ie, int *d_gsc
 				if(local_h < f) local_h = f;
 
 				if(threadIdx.x == tcheck && DEBUG == 1)
-					printf("i = %d, j = %d, h = %d\n", row_i, beg, local_h);
+				printf("i = %d, j = %d, h = %d\n", row_i, beg, local_h);
 				h1 = local_h;
 
 				// mj = local_m > local_h? mj : beg;
@@ -204,36 +205,36 @@ void sw_kernel(int *d_max, int *d_max_i, int *d_max_j, int *d_max_ie, int *d_gsc
 				if(f < t) f = t;
 				if(threadIdx.x == tcheck && DEBUG == 1)
 					printf("i = %d, j = %d, M = %d, h = %d, h1 = %d, e = %d, f = %d, t = %d\n", \
-							row_i, beg, in_h, local_h, h1, in_e, f, t);
+				row_i, beg, in_h, local_h, h1, in_e, f, t);
 				reset(&in_h, &in_e);
 				beg += 1;
 			}
-			__syncthreads();
-		};
-		if(threadIdx.x == active_ts - 1) {
-			out_h[threadIdx.x] = h1;
-			out_e[threadIdx.x] = 0;
-			if(i != passes - 1) {
-				sh[end] = h1;
-				se[end] = 0;
-			}
 		}
-
-		__syncthreads();
+		out_h[threadIdx.x] = h1;
+		out_e[threadIdx.x] = 0;
+		if(threadIdx.x == active_ts - 1 && i != passes - 1) {
+			sh[end] = h1;
+			se[end] = 0;
+		}
 
 		blocked = true;
 		while(blocked) {
 			if(0 == atomicCAS(&mLock, 0, 1)) {
 				// critical section
 				if(beg == qlen) {
-					max_ie = gscore > h1? max_ie : row_i;
-					gscore = gscore > h1? gscore : h1;
+					if(gscore < h1) {
+						max_ie = row_i;
+						gscore = h1;
+					} else if(gscore == h1 && max_ie < row_i) {
+						max_ie = row_i;
+					}
+
 				}
 				atomicExch(&mLock, 0);
 				blocked = false;
 			}
 		}
-		__syncthreads();
+//		__syncthreads();
 
 		blocked = true;
 		while(blocked) {
@@ -274,10 +275,11 @@ void sw_kernel(int *d_max, int *d_max_i, int *d_max_j, int *d_max_ie, int *d_gsc
 #define QLEN 50
 int main(int argc, char *argv[])
 {
-	int c, GPU = 1, tcheck = THREAD_CHECK;
-	while ((c = getopt(argc, argv, "t:g:")) >= 0) {
+	int c, GPU = 1, tcheck = THREAD_CHECK, pr = 0;
+	while ((c = getopt(argc, argv, "t:g:p:")) >= 0) {
 				if (c == 't') tcheck = atoi(optarg);
 				else if (c == 'g') GPU = atoi(optarg);
+				else if (c == 'p') pr = atoi(optarg);
 				else return 1;
 	}
 
@@ -391,7 +393,7 @@ int main(int argc, char *argv[])
 		gpuErrchk(cudaFree(d_h));
 		gpuErrchk(cudaFree(d_qp));
 		gpuErrchk(cudaFree(d_target));
-		if(DEBUG) printf("max = %d, max_i = %d, max_j = %d, max_ie = %d, gscore = %d, max_off = %d\n",\
+		if(DEBUG && pr) printf("max = %d, max_i = %d, max_j = %d, max_ie = %d, gscore = %d, max_off = %d\n",\
 						max, max_i, max_j, max_ie, gscore, max_off);
 
 	} else ksw_extend2(QLEN, &query[0], TLEN, &target[0], MATH_SIZE, mat, \
