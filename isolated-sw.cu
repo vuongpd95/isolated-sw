@@ -201,6 +201,8 @@ void sw_kernel(int *d_max, int *d_max_j, int *d_max_i, int *d_max_ie, int *d_gsc
 				in_e -= e_del;
 				//in_e = in_e > t? in_e : t;
 				if(in_e < t) in_e = t;
+
+				out_e[threadIdx.x] = in_e;
 				if(i != passes - 1) se[beg] = in_e;
 
 				t = in_h - oe_ins;
