@@ -150,14 +150,26 @@ void sw_kernel(int *d_max, int *d_max_i, int *d_max_j, int *d_max_ie, int *d_gsc
 //		}
 		__syncthreads();
 
-		while(beg < end) {
+		while(beg < end + 1) {
 			__syncthreads();
-			if(threadIdx.x == 0) {
-				in_h = sh[beg];
-				in_e = se[beg];
-			} else {
-				in_h = out_h[threadIdx.x - 1];
-				in_e = out_e[threadIdx.x - 1];
+			if(beg < end) {
+				if(threadIdx.x == 0) {
+					in_h = sh[beg];
+					in_e = se[beg];
+				} else {
+					in_h = out_h[threadIdx.x - 1];
+					in_e = out_e[threadIdx.x - 1];
+				}
+			}
+			__syncthreads();
+			if(beg == end) {
+				out_h[threadIdx.x] = h1;
+				out_e[threadIdx.x] = 0;
+				if(threadIdx.x == active_ts - 1 && i != passes - 1) {
+					sh[end] = h1;
+					se[end] = 0;
+				}
+				break;
 			}
 			__syncthreads();
 			if(check_active(in_h, in_e)) {
@@ -209,12 +221,6 @@ void sw_kernel(int *d_max, int *d_max_i, int *d_max_j, int *d_max_ie, int *d_gsc
 				reset(&in_h, &in_e);
 				beg += 1;
 			}
-		}
-		out_h[threadIdx.x] = h1;
-		out_e[threadIdx.x] = 0;
-		if(threadIdx.x == active_ts - 1 && i != passes - 1) {
-			sh[end] = h1;
-			se[end] = 0;
 		}
 
 		blocked = true;
@@ -285,8 +291,8 @@ int main(int argc, char *argv[])
 
 	int8_t mat[MATH_SIZE * MATH_SIZE];
 
-	uint8_t cquery[TLEN] = {1, 1, 3, 2, 2, 0, 1, 2, 0, 1, 2, 2, 3, 1, 3, 3, 2, 0, 3, 3, 1, 1, 2, 0, 3, 3, 1, 2, 2, 2, 0, 3, 3, 3, 2, 1, 0, 3, 0, 0, 0, 2, 3, 3, 0, 2, 2, 2, 2, 1};
-	uint8_t ctarget[QLEN] = {2, 3, 2, 0, 0, 1, 3, 1, 3, 1, 3, 3, 0, 2, 3, 2, 3, 3, 1, 3, 3, 1, 2, 2, 0, 2, 0, 2, 0, 3, 3, 2, 2, 1, 2, 2, 2, 1, 3, 2, 2, 2, 1, 3, 0, 0, 1, 0, 3, 3};
+	uint8_t cquery[TLEN] = {0, 2, 1, 1, 3, 1, 0, 2, 3, 3, 2, 1, 0, 1, 2, 0, 1, 3, 3, 2, 1, 0, 1, 0, 3, 0, 2, 3, 0, 2, 1, 0, 1, 2, 1, 0, 0, 1, 3, 3, 1, 1, 0, 1, 2, 2, 2, 3, 1, 1};
+	uint8_t ctarget[QLEN] = {2, 2, 1, 3, 2, 0, 3, 1, 0, 3, 3, 1, 3, 0, 0, 0, 1, 0, 2, 0, 3, 3, 1, 3, 0, 0, 1, 2, 3, 2, 3, 1, 1, 0, 0, 3, 1, 0, 0, 1, 3, 0, 2, 3, 0, 2, 3, 1, 2, 1};
 
 	uint8_t *query = &cquery[0];
 	uint8_t* target = &ctarget[0];
