@@ -54,9 +54,16 @@ int ksw_extend2(int qlen, const uint8_t *query, int tlen, const uint8_t *target,
 		int o_del, int e_del, int o_ins, int e_ins, int w, int end_bonus, int zdrop, int h0);
 
 __device__
-bool check_active(int32_t h, int32_t e)
+bool check_active(int32_t h, int32_t e, int *wait_cnt, int beg, int *out_h, int *out_e)
 {
-	if(h != -1 && e != -1) return true;
+	if(h != -1 && e != -1) {
+		if(*wait_cnt == beg) return true;
+		else {
+			*wait_cnt += 1;
+			*out_h = 0; *out_e = 0;
+			return false;
+		}
+	}
 	else return false;
 }
 __device__
@@ -87,7 +94,7 @@ void sw_kernel(int *d_max, int *d_max_i, int *d_max_j, int *d_max_ie, int *d_gsc
 
 	bool blocked = true;
 	int in_h, in_e;
-	int i;
+	int i, k, wait_cnt;
 	int active_ts, beg, end;
 	int32_t *se, *sh;
 	int8_t *sqp;
@@ -128,6 +135,7 @@ void sw_kernel(int *d_max, int *d_max_i, int *d_max_j, int *d_max_ie, int *d_gsc
 		reset(&in_h, &in_e);
 		reset(&out_h[threadIdx.x], &out_e[threadIdx.x]);
 		beg = 0; end = qlen;
+		wait_cnt = 0;
 
 		int t, row_i, f = 0, h1, local_m = 0, mj = -1;
 		row_i = i * WARP + threadIdx.x;
@@ -145,38 +153,38 @@ void sw_kernel(int *d_max, int *d_max_i, int *d_max_j, int *d_max_ie, int *d_gsc
 
 		__syncthreads();
 
-		while(beg < end + 1) {
+		for(k = beg; k <= end;) {
 			__syncthreads();
-			if(beg < end) {
+			if(k < end) {
 				if(threadIdx.x == 0) {
-					in_h = sh[beg];
-					in_e = se[beg];
+					in_h = sh[k];
+					in_e = se[k];
 				} else {
 					in_h = out_h[threadIdx.x - 1];
 					in_e = out_e[threadIdx.x - 1];
 				}
-			}
+			} else reset(&in_e, &in_h);
 			__syncthreads();
-			if(beg == end) {
+			if(k == end) {
 				out_h[threadIdx.x] = h1;
 				out_e[threadIdx.x] = 0;
-				if(threadIdx.x == active_ts - 1 && i != passes - 1) {
+				if(threadIdx.x == active_ts - 1) {
 					sh[end] = h1;
 					se[end] = 0;
 				}
 				break;
 			}
 			__syncthreads();
-			if(check_active(in_h, in_e)) {
+			if(check_active(in_h, in_e, &wait_cnt, beg, &out_h[threadIdx.x], &out_e[threadIdx.x])) {
 				int local_h;
 				if(threadIdx.x == tcheck && DEBUG == 1)
-					printf("i = %d, j = %d, M = %d, h1 = %d\n", row_i, beg, in_h, h1);
+					printf("i = %d, j = %d, M = %d, h1 = %d\n", row_i, k, in_h, h1);
 
 				out_h[threadIdx.x] = h1;
-				if(i != passes - 1) sh[beg] = h1;
+				if(threadIdx.x == active_ts - 1) sh[k] = h1;
 
 				//in_h = in_h? in_h + q[beg] : 0;
-				if(in_h) in_h = in_h + q[beg];
+				if(in_h) in_h = in_h + q[k];
 				else in_h = 0;
 
 				// local_h = in_h > in_e? in_h : in_e;
@@ -187,11 +195,11 @@ void sw_kernel(int *d_max, int *d_max_i, int *d_max_j, int *d_max_ie, int *d_gsc
 				if(local_h < f) local_h = f;
 
 				if(threadIdx.x == tcheck && DEBUG == 1)
-					printf("i = %d, j = %d, h = %d\n", row_i, beg, local_h);
+					printf("i = %d, j = %d, h = %d\n", row_i, k, local_h);
 				h1 = local_h;
 
 				// mj = local_m > local_h? mj : beg;
-				if(local_m <= local_h) mj = beg;
+				if(local_m <= local_h) mj = k;
 				//local_m = local_m > local_h? local_m : local_h;
 				if(local_m < local_h) local_m = local_h;
 
@@ -203,7 +211,7 @@ void sw_kernel(int *d_max, int *d_max_i, int *d_max_j, int *d_max_ie, int *d_gsc
 				if(in_e < t) in_e = t;
 
 				out_e[threadIdx.x] = in_e;
-				if(i != passes - 1) se[beg] = in_e;
+				if(threadIdx.x == active_ts - 1) se[k] = in_e;
 
 				t = in_h - oe_ins;
 				//t = t > 0? t : 0;
@@ -213,9 +221,9 @@ void sw_kernel(int *d_max, int *d_max_i, int *d_max_j, int *d_max_ie, int *d_gsc
 				if(f < t) f = t;
 				if(threadIdx.x == tcheck && DEBUG == 1)
 					printf("i = %d, j = %d, M = %d, h = %d, h1 = %d, e = %d, f = %d, t = %d\n", \
-							row_i, beg, in_h, local_h, h1, in_e, f, t);
+							row_i, k, in_h, local_h, h1, in_e, f, t);
 				reset(&in_h, &in_e);
-				beg += 1;
+				k += 1;
 			}
 		}
 
@@ -223,7 +231,7 @@ void sw_kernel(int *d_max, int *d_max_i, int *d_max_j, int *d_max_ie, int *d_gsc
 		while(blocked) {
 			if(0 == atomicCAS(&mLock, 0, 1)) {
 				// critical section
-				if(beg == qlen) {
+				if(k == qlen) {
 					if(gscore < h1) {
 						max_ie = row_i;
 						gscore = h1;
@@ -266,8 +274,8 @@ void sw_kernel(int *d_max, int *d_max_i, int *d_max_j, int *d_max_ie, int *d_gsc
 		*d_max_off = max_off;
 	}
 }
-#define QLEN 50
-#define TLEN 33
+#define QLEN 33
+#define TLEN 50
 
 int main(int argc, char *argv[])
 {
@@ -281,8 +289,8 @@ int main(int argc, char *argv[])
 
 	int8_t mat[MATH_SIZE * MATH_SIZE];
 
-	uint8_t cquery[QLEN] = {0, 2, 1, 2, 0, 1, 2, 3, 0, 1, 2, 0, 3, 0, 0, 1, 1, 3, 3, 0, 0, 3, 1, 3, 2, 2, 2, 0, 1, 3, 1, 2, 1, 3, 0, 1, 0, 2, 0, 1, 3, 3, 1, 3, 3, 1, 0, 0, 0, 3};
-	uint8_t ctarget[TLEN] = {1, 0, 2, 2, 0, 1, 0, 2, 1, 2, 1, 3, 0, 2, 2, 0, 3, 2, 2, 0, 3, 1, 3, 1, 0, 2, 2, 1, 3, 3, 0, 0, 3};
+	uint8_t cquery[QLEN] = {2, 2, 0, 0, 0, 2, 0, 3, 1, 2, 2, 3, 1, 2, 3, 2, 3, 1, 1, 3, 2, 3, 2, 3, 1, 3, 1, 3, 3, 0, 1, 1, 3};
+	uint8_t ctarget[TLEN] = {1, 2, 3, 3, 2, 2, 0, 1, 0, 0, 2, 3, 3, 0, 2, 0, 1, 1, 2, 0, 3, 1, 2, 2, 3, 1, 1, 3, 2, 3, 2, 3, 1, 1, 3, 3, 0, 3, 0, 0, 3, 2, 3, 2, 2, 1, 3, 3, 3, 1};
 
 	uint8_t *query = &cquery[0];
 	uint8_t* target = &ctarget[0];
