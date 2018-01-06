@@ -250,7 +250,7 @@ void sw_kernel(int *d_max, int *d_max_i, int *d_max_j, int *d_max_ie, int *d_gsc
 					max = local_m, max_i = row_i, max_j = mj;
 					max_off = max_off > abs(mj - row_i)? max_off : abs(mj - row_i);
 				} else if (zdrop > 0) {
-					if (i - max_i > mj - max_j) {
+					if (row_i - max_i > mj - max_j) {
 						if (max - local_m - ((row_i - max_i) - (mj - max_j)) * e_del > zdrop) break_cnt += 1;
 					} else {
 						if (max - local_m - ((mj - max_j) - (row_i - max_i)) * e_ins > zdrop) break_cnt += 1;
