@@ -149,8 +149,8 @@ void sw_kernel(int *d_max, int *d_max_j, int *d_max_i, int *d_max_ie, int *d_gsc
 
 		__syncthreads();
 
-		 while(beg < end) {
-			 __syncthreads();
+		while(beg < end + 1) {
+			__syncthreads();
 			if(beg < end) {
 				if(threadIdx.x == 0) {
 					in_h = sh[beg];
@@ -201,7 +201,6 @@ void sw_kernel(int *d_max, int *d_max_j, int *d_max_i, int *d_max_ie, int *d_gsc
 				in_e -= e_del;
 				//in_e = in_e > t? in_e : t;
 				if(in_e < t) in_e = t;
-				out_e[threadIdx.x] = in_e;
 				if(i != passes - 1) se[beg] = in_e;
 
 				t = in_h - oe_ins;
@@ -210,7 +209,6 @@ void sw_kernel(int *d_max, int *d_max_j, int *d_max_i, int *d_max_ie, int *d_gsc
 				f -= e_ins;
 				//f = f > t? f : t;
 				if(f < t) f = t;
-
 				reset(&in_h, &in_e);
 				beg += 1;
 			}
@@ -227,11 +225,13 @@ void sw_kernel(int *d_max, int *d_max_j, int *d_max_i, int *d_max_ie, int *d_gsc
 					} else if(gscore == h1 && max_ie < row_i) {
 						max_ie = row_i;
 					}
+
 				}
 				atomicExch(&mLock, 0);
 				blocked = false;
 			}
 		}
+//		__syncthreads();
 
 		blocked = true;
 		while(blocked) {
@@ -250,6 +250,7 @@ void sw_kernel(int *d_max, int *d_max_j, int *d_max_i, int *d_max_ie, int *d_gsc
 				blocked = false;
 			}
 		}
+		//if (break_cnt > 0) break;
 	}
 	__syncthreads();
 	if(threadIdx.x == 0) {
