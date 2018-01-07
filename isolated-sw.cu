@@ -269,8 +269,6 @@ void sw_kernel(int *d_max, int *d_max_i, int *d_max_j, int *d_max_ie, int *d_gsc
 	*d_max = max;
 	*d_max_i = max_i;
 	*d_max_j = max_j;
-	*d_max_ie = -1;
-	*d_gscore = -1;
 	*d_max_ie = max_ie;
 	*d_gscore = gscore;
 	*d_max_off = max_off;
