@@ -154,7 +154,6 @@ void sw_kernel(int *d_max, int *d_max_i, int *d_max_j, int *d_max_ie, int *d_gsc
 		__syncthreads();
 
 		for(k = beg; k <= end;) {
-			__syncthreads();
 			if(k < end) {
 				if(threadIdx.x == 0) {
 					in_h = sh[k];
@@ -163,7 +162,7 @@ void sw_kernel(int *d_max, int *d_max_i, int *d_max_j, int *d_max_ie, int *d_gsc
 					in_h = out_h[threadIdx.x - 1];
 					in_e = out_e[threadIdx.x - 1];
 				}
-			} else reset(&in_e, &in_h);
+			}
 			__syncthreads();
 			if(k == end) {
 				out_h[threadIdx.x] = h1;
@@ -225,6 +224,7 @@ void sw_kernel(int *d_max, int *d_max_i, int *d_max_j, int *d_max_ie, int *d_gsc
 				reset(&in_h, &in_e);
 				k += 1;
 			}
+			__syncthreads();
 		}
 
 		blocked = true;
@@ -265,14 +265,13 @@ void sw_kernel(int *d_max, int *d_max_i, int *d_max_j, int *d_max_ie, int *d_gsc
 		//if (break_cnt > 0) break;
 	}
 	__syncthreads();
-	if(threadIdx.x == 0) {
-		*d_max = max;
-		*d_max_i = max_i;
-		*d_max_j = max_j;
-		*d_max_ie = max_ie;
-		*d_gscore = gscore;
-		*d_max_off = max_off;
-	}
+
+	*d_max = max;
+	*d_max_i = max_i;
+	*d_max_j = max_j;
+	*d_max_ie = max_ie;
+	*d_gscore = gscore;
+	*d_max_off = max_off;
 }
 #define QLEN 33
 #define TLEN 50
@@ -382,8 +381,8 @@ int main(int argc, char *argv[])
 		free(h); free(qp);
 		// Get the result back from kernel
 		gpuErrchk(cudaMemcpy(&max, d_max, sizeof(int), cudaMemcpyDeviceToHost));
-		gpuErrchk(cudaMemcpy(&max_j, d_max_j, sizeof(int), cudaMemcpyDeviceToHost));
 		gpuErrchk(cudaMemcpy(&max_i, d_max_i, sizeof(int), cudaMemcpyDeviceToHost));
+		gpuErrchk(cudaMemcpy(&max_j, d_max_j, sizeof(int), cudaMemcpyDeviceToHost));
 		gpuErrchk(cudaMemcpy(&max_ie, d_max_ie, sizeof(int), cudaMemcpyDeviceToHost));
 		gpuErrchk(cudaMemcpy(&gscore, d_gscore, sizeof(int), cudaMemcpyDeviceToHost));
 		gpuErrchk(cudaMemcpy(&max_off, d_max_off, sizeof(int), cudaMemcpyDeviceToHost));
