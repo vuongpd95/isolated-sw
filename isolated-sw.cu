@@ -175,9 +175,9 @@ void sw_kernel(int *d_max, int *d_max_j, int *d_max_i, int *d_max_ie, int *d_gsc
 					sh[end] = h1;
 					se[end] = 0;
 				}
-				break;
 			}
 			__syncthreads();
+			if(k == end) break;
 			if(check_active(in_h, in_e, &wait_cnt, beg, &out_h[threadIdx.x], &out_e[threadIdx.x])) {
 				int local_h;
 
