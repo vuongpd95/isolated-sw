@@ -260,6 +260,7 @@ void sw_kernel(int *d_max, int *d_max_j, int *d_max_i, int *d_max_ie, int *d_gsc
 				blocked = false;
 			}
 		}
+		__syncthreads();
 	}
 	__syncthreads();
 
